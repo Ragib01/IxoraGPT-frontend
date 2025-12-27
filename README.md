@@ -66,7 +66,7 @@ A modern, responsive chat interface built with Next.js for interacting with the 
     bun dev
     ```
 
-5.  Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+5.  Open [http://localhost:3005](http://localhost:3005) with your browser to see the result.
 
 ## Project Structure
 
