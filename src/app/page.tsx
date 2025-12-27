@@ -1,65 +1,148 @@
-import Image from "next/image";
+"use client";
+
+import { useState, useMemo } from "react";
+import { Sidebar } from "@/components/sidebar";
+import { MessageList, Message } from "@/components/message-list";
+import { ChatInput } from "@/components/chat-input";
+import { streamChat } from "@/lib/api";
 
 export default function Home() {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const sessionId = useMemo(() => `session-${Math.random().toString(36).substring(2, 9)}`, []);
+
+  const handleSendMessage = async (content: string) => {
+    if (!content.trim() || isLoading) return;
+
+    // Clear input immediately
+    setInputValue("");
+
+    // Add user message
+    const userMessage: Message = { role: "user", content };
+    setMessages((prev) => [...prev, userMessage]);
+
+    setIsLoading(true);
+
+    // Initial assistant message state
+    const assistantMessage: Message = {
+      role: "assistant",
+      content: "",
+      thinking: "Preparing...",
+      isThinking: true,
+      reasoningSteps: []
+    };
+
+    setMessages((prev) => [...prev, assistantMessage]);
+
+    try {
+      for await (const event of streamChat(content, sessionId)) {
+        setMessages((prev) => {
+          const newMessages = [...prev];
+          const lastIndex = newMessages.length - 1;
+          const lastMsg = { ...newMessages[lastIndex] };
+
+          switch (event.type) {
+            case "thinking":
+              lastMsg.thinking = event.message;
+              lastMsg.isThinking = true;
+              break;
+            case "agent_step":
+              const agentSteps = [...(lastMsg.agentSteps || [])];
+              const currentStepIndex = agentSteps.findIndex(s => s.agent === event.agent && s.status === "in_progress");
+
+              if (event.status === "completed") {
+                if (currentStepIndex > -1) {
+                  agentSteps[currentStepIndex] = {
+                    agent: event.agent!,
+                    step: event.step!,
+                    status: "completed",
+                    response: event.response
+                  };
+                } else {
+                  agentSteps.push({
+                    agent: event.agent!,
+                    step: event.step!,
+                    status: "completed",
+                    response: event.response
+                  });
+                }
+                lastMsg.isThinking = false;
+                lastMsg.thinking = undefined;
+              } else {
+                // in_progress
+                if (currentStepIndex === -1) {
+                  agentSteps.push({
+                    agent: event.agent!,
+                    step: event.step!,
+                    status: "in_progress"
+                  });
+                }
+                lastMsg.isThinking = true;
+                lastMsg.thinking = `${event.agent}: ${event.step}...`;
+              }
+              lastMsg.agentSteps = agentSteps;
+              break;
+            case "reasoning":
+              if (event.step) {
+                lastMsg.reasoningSteps = [...(lastMsg.reasoningSteps || []), event.step];
+              }
+              break;
+            case "content":
+              lastMsg.isThinking = false;
+              lastMsg.content += event.chunk;
+              break;
+            case "metadata":
+              // Handle metadata if needed
+              break;
+            case "done":
+              lastMsg.isThinking = false;
+              lastMsg.thinking = undefined;
+              break;
+            case "error":
+              lastMsg.content += `\n\n[Error: ${event.message}]`;
+              lastMsg.isThinking = false;
+              break;
+          }
+
+          newMessages[lastIndex] = lastMsg;
+          return newMessages;
+        });
+      }
+    } catch (error) {
+      console.error("Streaming error:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <>
+      <Sidebar />
+      <main className="flex-1 flex flex-col h-full bg-background relative overflow-hidden">
+        {/* Header - shown on mobile if sidebar is hidden */}
+        <div className="md:hidden flex items-center justify-center h-14 border-b border-gray-800">
+          <span className="font-semibold text-sm">IxoraGPT</span>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Chat Area */}
+        <div className="flex-1 overflow-hidden flex flex-col pt-4 md:pt-0">
+          <MessageList
+            messages={messages}
+            onSelectPrompt={(prompt) => setInputValue(prompt)}
+          />
+        </div>
+
+        {/* Input Area */}
+        <div className="w-full">
+          <ChatInput
+            value={inputValue}
+            onChange={setInputValue}
+            onSend={handleSendMessage}
+            isLoading={isLoading}
+          />
         </div>
       </main>
-    </div>
+    </>
   );
 }
